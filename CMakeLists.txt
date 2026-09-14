@@ -21,7 +21,14 @@ if (WIN32)
 elseif (APPLE)
     set(ONNXRUNTIME_DIR_NAME "onnxruntime-osx-universal2-1.23.2") # one build for both Intel and Apple Silicon
     set(ONNXRUNTIME_LINK_LIB "libonnxruntime.dylib")
-    set(ONNXRUNTIME_RUNTIME_FILE "libonnxruntime.dylib")
+    # The dylib's own install name (LC_ID_DYLIB) is the *versioned* name
+    # below, not the unversioned "libonnxruntime.dylib" - that string gets
+    # baked into the app binary's load command regardless of which filename
+    # we link against. Bundling it as the unversioned name lets linking
+    # succeed but makes dyld fail to find it at launch (@rpath lookup for
+    # the versioned name comes up empty), so the runtime file copied into
+    # the bundle must match the versioned name.
+    set(ONNXRUNTIME_RUNTIME_FILE "libonnxruntime.1.23.2.dylib")
 elseif (UNIX)
     set(ONNXRUNTIME_DIR_NAME "onnxruntime-linux-x64-1.23.2")
     set(ONNXRUNTIME_LINK_LIB "libonnxruntime.so")

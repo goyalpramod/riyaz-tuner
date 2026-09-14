@@ -13,6 +13,40 @@ namespace
         AlankarPatternId::Alankar1, AlankarPatternId::Alankar2, AlankarPatternId::Alankar3,
         AlankarPatternId::Alankar4, AlankarPatternId::Alankar5
     };
+
+    // Many Bluetooth headsets/earbuds only expose 1 output channel. Asking
+    // JUCE for 2 unconditionally forces it into AudioIODeviceCombiner (to
+    // synthesize the missing channel), and JUCE's CoreAudio combiner has a
+    // known buffer-sizing bug that heap-overflows on every callback once
+    // engaged. Query what the default output device actually supports first,
+    // so a mono device is opened as mono instead of routed through the
+    // combiner. Falls back to stereo (the previous behaviour) if the device
+    // list can't be queried for any reason.
+    int detectPreferredOutputChannels (juce::AudioDeviceManager& deviceManager)
+    {
+        constexpr int fallback = 2;
+
+        auto& deviceTypes = deviceManager.getAvailableDeviceTypes();
+        if (deviceTypes.isEmpty())
+            return fallback;
+
+        auto* deviceType = deviceTypes.getFirst();
+        if (deviceType == nullptr)
+            return fallback;
+
+        deviceType->scanForDevices();
+        const auto outputNames = deviceType->getDeviceNames (false);
+        const auto defaultIndex = deviceType->getDefaultDeviceIndex (false);
+        if (! juce::isPositiveAndBelow (defaultIndex, outputNames.size()))
+            return fallback;
+
+        std::unique_ptr<juce::AudioIODevice> probe (deviceType->createDevice (outputNames[defaultIndex], {}));
+        if (probe == nullptr)
+            return fallback;
+
+        const auto available = probe->getOutputChannelNames().size();
+        return available > 0 ? juce::jmin (fallback, available) : fallback;
+    }
 }
 
 juce::String MainComponent::resolveCrepeModelPath()
@@ -428,10 +462,12 @@ MainComponent::MainComponent (const juce::String& profileNameIn, std::optional<f
 
     setSize (600, 560);
 
-    // Mono input (mic) plus STEREO output: the tanpura drone is rendered into
-    // the output channels. See getNextAudioBlock() for why this channel count
-    // change makes the order of operations there safety-critical.
-    setAudioChannels (1, 2);
+    // Mono input (mic) plus stereo output where the device supports it: the
+    // tanpura drone is rendered into the output channels. See
+    // getNextAudioBlock() for why this channel count change makes the order
+    // of operations there safety-critical. Output channel count is detected
+    // rather than hardcoded to 2 - see detectPreferredOutputChannels() above.
+    setAudioChannels (1, detectPreferredOutputChannels (deviceManager));
 
     // setAudioChannels() opens the device synchronously (and, on success, has
     // already called prepareToPlay() by the time it returns). If no device
