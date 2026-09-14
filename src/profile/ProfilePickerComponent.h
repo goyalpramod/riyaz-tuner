@@ -37,6 +37,7 @@ private:
 
     juce::Label newProfileLabel;
     juce::TextEditor newProfileNameEditor;
+    juce::TextEditor newProfileSaHzEditor;
     juce::TextButton createButton;
     juce::Label errorLabel;
 };

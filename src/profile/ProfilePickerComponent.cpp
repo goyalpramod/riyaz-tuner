@@ -2,6 +2,15 @@
 #include "ProfilePickerComponent.h"
 #include "../ui/RiyaazLookAndFeel.h"
 
+namespace
+{
+    // Sanity bounds for a manually-entered Sa, not a musical constraint -
+    // wide enough to cover any real tanpura/voice tuning, just narrow enough
+    // to catch a fat-fingered typo (e.g. "2200" instead of "220").
+    constexpr float kMinManualSaHz = 50.0f;
+    constexpr float kMaxManualSaHz = 1000.0f;
+}
+
 ProfilePickerComponent::ProfilePickerComponent (ProfileStore& storeIn) : store (storeIn)
 {
     addAndMakeVisible (titleLabel);
@@ -55,6 +64,16 @@ ProfilePickerComponent::ProfilePickerComponent (ProfileStore& storeIn) : store (
     newProfileNameEditor.setFont (RiyaazLookAndFeel::bodyFont());
     newProfileNameEditor.setJustification (juce::Justification::centredLeft);
 
+    addAndMakeVisible (newProfileSaHzEditor);
+    // Optional: leaving this blank keeps the original behaviour (mic
+    // calibration on first use). Filling it in lets someone who already
+    // knows their Sa (e.g. matching a tanpura they tune by ear, or copying
+    // a value from another device) skip calibration entirely.
+    newProfileSaHzEditor.setTextToShowWhenEmpty ("Sa Hz (optional)", RiyaazColours::placeholderText);
+    newProfileSaHzEditor.setFont (RiyaazLookAndFeel::bodyFont());
+    newProfileSaHzEditor.setJustification (juce::Justification::centredLeft);
+    newProfileSaHzEditor.setInputRestrictions (0, "0123456789.");
+
     addAndMakeVisible (createButton);
     createButton.setButtonText ("Create");
     createButton.setColour (juce::TextButton::textColourOffId, RiyaazColours::gold);
@@ -76,7 +95,30 @@ ProfilePickerComponent::ProfilePickerComponent (ProfileStore& storeIn) : store (
             }
         }
 
-        resolve (name, std::nullopt); // a new profile always (re)calibrates - there is no saved Sa to reuse yet
+        const auto saHzText = newProfileSaHzEditor.getText().trim();
+        if (saHzText.isEmpty())
+        {
+            resolve (name, std::nullopt); // no Sa given - (re)calibrate via mic as before
+            return;
+        }
+
+        const float saHz = saHzText.getFloatValue();
+        if (saHz < kMinManualSaHz || saHz > kMaxManualSaHz)
+        {
+            errorLabel.setText ("Enter a Sa between " + juce::String (kMinManualSaHz, 0)
+                                     + " and " + juce::String (kMaxManualSaHz, 0) + " Hz, or leave it blank to calibrate.",
+                                 juce::dontSendNotification);
+            return;
+        }
+
+        // Store the profile ourselves before resolving: resolve() with a
+        // known Sa takes the "Use saved Sa" path in MainComponent, which
+        // deliberately does NOT re-save (see pitchWorkerUpdate() - reusing a
+        // saved Sa is defined as "nothing new to save"). For a brand new
+        // profile there is nothing in the store yet, so without this the
+        // name would vanish from the picker on next launch.
+        store.save ({ name, saHz });
+        resolve (name, saHz);
     };
 
     addAndMakeVisible (errorLabel);
@@ -128,6 +170,8 @@ void ProfilePickerComponent::resized()
     area.removeFromTop (6);
     auto newProfileRow = area.removeFromTop (36);
     createButton.setBounds (newProfileRow.removeFromRight (100));
+    newProfileRow.removeFromRight (12);
+    newProfileSaHzEditor.setBounds (newProfileRow.removeFromRight (130));
     newProfileRow.removeFromRight (12);
     newProfileNameEditor.setBounds (newProfileRow);
 
